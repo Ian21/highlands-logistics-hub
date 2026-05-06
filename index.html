@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Highlands Logistics Trade-Hub</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 10px; background: #eef2f3; margin: 0; }
+        .container { max-width: 950px; margin: auto; padding: 10px; }
+        #loginOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #004d99; display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .login-box { background: white; padding: 40px; border-radius: 8px; text-align: center; width: 320px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        #dashboard { display: none; }
+        .admin-panel { background: #fff3cd; border: 2px dashed #856404; padding: 15px; margin-bottom: 20px; border-radius: 8px; display: none; }
+        .hub-box { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h1 { color: #004d99; border-bottom: 3px solid #004d99; padding-bottom: 10px; display: flex; justify-content: space-between; }
+        .input-group { display: flex; flex-wrap: wrap; gap: 10px; }
+        input, select, button { padding: 12px; border: 1px solid #ccc; border-radius: 4px; flex: 1 1 180px; }
+        button { background: #004d99; color: white; border: none; cursor: pointer; font-weight: bold; }
+        .btn-delete { background: #cc0000; padding: 6px; font-size: 12px; flex: none; }
+        
+        /* Interactive Status Tags */
+        .status-tag { padding: 8px; border-radius: 12px; color: white; font-size: 13px; font-weight: bold; border: none; cursor: pointer; text-align: center; width: 100%; }
+        .delivered { background: #28a745; } .transit { background: #fd7e14; } .pending { background: #6c757d; }
+        
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
+        th { background: #004d99; color: white; padding: 15px; text-align: left; }
+        td { padding: 15px; border-bottom: 1px solid #ddd; }
+        .partner-card { display: flex; justify-content: space-between; background: white; padding: 10px; margin-top: 5px; border: 1px solid #ddd; }
+        
+        .stat-card { flex: 1; text-align: center; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+
+    <div id="loginOverlay">
+        <div class="login-box">
+            <h2 style="color:#004d99">Highlands Hub</h2>
+            <input type="text" id="uIn" placeholder="Username" style="width:90%; margin-bottom:10px;"><br>
+            <input type="password" id="pIn" placeholder="Password" style="width:90%; margin-bottom:10px;"><br>
+            <button onclick="attemptLogin()" style="width:95%">Login</button>
+        </div>
+    </div>
+
+    <div id="dashboard" class="container">
+        <h1>Highlands Trade-Hub <span id="userTag" style="font-size:16px; color:#666;"></span></h1>
+
+        <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+            <div class="stat-card">
+                <p style="margin:0; color:#666; font-size:14px;">Total Shipments</p>
+                <h2 id="totalCount" style="margin:5px 0; color:#004d99;">0</h2>
+            </div>
+            <div class="stat-card">
+                <p style="margin:0; color:#666; font-size:14px;">Total Quantity (Units)</p>
+                <h2 id="totalQty" style="margin:5px 0; color:#28a745;">0</h2>
+            </div>
+        </div>
+
+        <div id="adminSection" class="admin-panel">
+            <h3>🛠️ Admin Management</h3>
+            <div class="input-group">
+                <input type="text" id="newU" placeholder="Partner Name">
+                <input type="password" id="newP" placeholder="Password">
+                <button onclick="createPartner()" style="background:#856404">Add Partner</button>
+            </div>
+            <div id="partnerList" style="margin-top:15px;"></div>
+        </div>
+        
+        <div class="hub-box">
+            <button onclick="exportCSV()" style="background:#28a745; width:100%; margin-bottom:15px;">📊 Download CSV Report</button>
+            <div class="input-group">
+                <input type="text" id="comp" placeholder="Company">
+                <input type="text" id="item" placeholder="Cargo">
+                <input type="number" id="qty" placeholder="Qty">
+                <select id="stat"><option>Pending</option><option>In Transit</option><option>Delivered</option></select>
+                <button onclick="addShipment()">Add to Hub</button>
+            </div>
+            <button onclick="location.reload()" style="background:#666; margin-top:15px;">Logout</button>
+        </div>
+
+        <div class="hub-box">
+            <input type="text" onkeyup="search(this.value)" placeholder="Quick search..." style="width:100%; border: 2px solid #004d99;">
+        </div>
+
+        <table>
+            <thead><tr><th>Company</th><th>Item</th><th>Qty</th><th>Status (Click to Change)</th><th>Action</th></tr></thead>
+            <tbody id="rows"></tbody>
+        </table>
+    </div>
+
+    <script>
+        let currentUser = "";
+        let currentData = [];
+
+        async function attemptLogin() {
+            const u = document.getElementById('uIn').value;
+            const p = document.getElementById('pIn').value;
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const data = await res.json();
+            if (data.success) {
+                currentUser = data.username;
+                document.getElementById('loginOverlay').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                const lower = currentUser.toLowerCase();
+                if (lower === 'admin' || lower === 'ikunumb') {
+                    document.getElementById('adminSection').style.display = 'block';
+                    document.getElementById('userTag').innerText = `Admin: ${currentUser}`;
+                    loadPartners();
+                } else {
+                    document.getElementById('userTag').innerText = `Partner: ${currentUser}`;
+                }
+                loadTable();
+            } else { alert("Login Failed"); }
+        }
+
+        async function loadPartners() {
+            const res = await fetch('/api/admin/users');
+            const data = await res.json();
+            document.getElementById('partnerList').innerHTML = data.map(p => `
+                <div class="partner-card">
+                    <span><strong>${p.username}</strong></span>
+                    ${p.username.toLowerCase() !== 'admin' && p.username.toLowerCase() !== 'ikunumb' 
+                        ? `<button class="btn-delete" onclick="delPartner(${p.user_id})">Delete</button>` 
+                        : '<i>System Account</i>'}
+                </div>`).join('');
+        }
+
+        async function createPartner() {
+            await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username: document.getElementById('newU').value, password: document.getElementById('newP').value })
+            });
+            loadPartners();
+        }
+
+        async function delPartner(id) {
+            if(confirm("Delete Partner?")) {
+                await fetch('/api/admin/users/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id }) });
+                loadPartners();
+            }
+        }
+
+        async function loadTable() {
+            const res = await fetch('/api/shipments', { headers: {'x-username': currentUser} });
+            currentData = await res.json();
+
+            // UPDATE ANALYTICS
+            document.getElementById('totalCount').innerText = currentData.length;
+            document.getElementById('totalQty').innerText = currentData.reduce((s, r) => s + parseInt(r.qty || 0), 0);
+
+            document.getElementById('rows').innerHTML = currentData.map(r => `
+                <tr>
+                    <td>${r.company}</td><td>${r.item}</td><td>${r.qty}</td>
+                    <td>
+                        <select onchange="updateStatus(${r.shipment_id}, this.value)" class="status-tag ${r.status.toLowerCase().replace(" ","")}">
+                            <option value="Pending" ${r.status === 'Pending' ? 'selected' : ''}>Pending</option>
+                            <option value="In Transit" ${r.status === 'In Transit' ? 'selected' : ''}>In Transit</option>
+                            <option value="Delivered" ${r.status === 'Delivered' ? 'selected' : ''}>Delivered</option>
+                        </select>
+                    </td>
+                    <td><button class="btn-delete" onclick="delShipment(${r.shipment_id})">Delete</button></td>
+                </tr>`).join('');
+        }
+
+        async function updateStatus(id, newStatus) {
+            await fetch('/api/shipments/update-status', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ id: id, status: newStatus })
+            });
+            loadTable(); // Refresh table to update colors and qty
+        }
+
+        async function addShipment() {
+            await fetch('/api/shipments', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    company: document.getElementById('comp').value,
+                    item: document.getElementById('item').value,
+                    qty: document.getElementById('qty').value,
+                    status: document.getElementById('stat').value,
+                    username: currentUser
+                })
+            });
+            loadTable();
+            document.getElementById('comp').value = ''; document.getElementById('item').value = ''; document.getElementById('qty').value = '';
+        }
+
+        async function delShipment(id) {
+            await fetch('/api/shipments/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id }) });
+            loadTable();
+        }
+
+        function search(val) {
+            let tr = document.getElementById("rows").getElementsByTagName("tr");
+            for (let i = 0; i < tr.length; i++) {
+                tr[i].style.display = tr[i].innerText.toUpperCase().includes(val.toUpperCase()) ? "" : "none";
+            }
+        }
+
+        function exportCSV() {
+            let csv = "Company,Item,Qty,Status\n" + currentData.map(r => `${r.company},${r.item},${r.qty},${r.status}`).join("\n");
+            let a = document.createElement('a');
+            a.href = window.URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+            a.download = 'Highlands_Logistics_Report.csv';
+            a.click();
+        }
+    </script>
+</body>
+</html>
